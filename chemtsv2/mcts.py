@@ -15,9 +15,6 @@ from chemtsv2.utils import (
     back_propagation,
 )
 
-from chemtesv2.SmilesEnumerator import SmilesEnumerator
-
-
 
 class State:
     def __init__(self, position=["&"], parent=None):
@@ -76,8 +73,6 @@ class Node:
         self.state.total_reward += reward
 
 
-
-
 class MCTS:
     def __init__(
         self,
@@ -106,7 +101,6 @@ class MCTS:
         self.generated_dict = {}  # dictionary of generated compounds
         self.generated_id_list = []
         self.filter_check_list = []
-        self.heavy_atom_count_list=[]
         self.total_valid_num = 0
 
         if conf["batch_reward_calculation"]:
@@ -134,110 +128,6 @@ class MCTS:
             self.threshold = conf["generation_num"]
         else:
             sys.exit("[ERROR] Specify 'threshold_type': [time, generation_num]")
-
-
-
-    def select_melecular_from_csv(  )
-
-
-        return select_mol_list
-
-
-    def smiles_synonymous_transform(smi):
-        smiles_synonymous_list=[]
-        for i in range(10):
-            smiles_will_add=sme.randomize_smiles("CCC(=O)O[C@@]1(CC[NH+](C[C@H]1CC=C)C)c2ccccc2")
-            smiles_synonymous_list.append(smiles_will_add)
-
-        smiles_synonymous_list = list(set(smiles_synonymous_list))
-        return smiles_synonymous_list
-
-
-
-
-    def add_synonymous_mol_to_mcts(self,select_mol_list):
-
-        for mol in select_mol_list
-            '''使用rdkit同义变换'''
-            smiles_synonymous_list
-            '''去除重复字符串'''
-
-            synonymous_mol_list=[]
-
-
-            for wait_add_mol in synonymous_mol_list:
-            '''token化 smiles'''
-                smi_tokened = smi_tokenizer(wait_add_mol)
-            '''依次将token过的词按照层加入蒙特卡洛树'''
-                state = node.state.clone()
-
-                for child in node.state.child_nodes:
-                    if child.position == token:
-                        node=self.rootnode
-
-
-            re_list = []
-            atom_checked = []
-
-            '''
-            node_index：节点索引，每个token所在层的对应原子索引
-            对于打乱重排的分子需要重新检索
-
-
-            '''
-            for i in range(len(node_index)):
-                m = node_index[i]
-                atom = nodeadded[m]
-                state_clone = state.clone(include_visit=True, include_total_reward=True)
-
-                if atom not in atom_checked:
-                    node.add_node(atom, state_clone)
-                    node_pool.append(node.state.child_nodes[len(atom_checked)])
-                    atom_checked.append(atom)
-                else:
-                    node_pool.append(node.state.child_nodes[atom_checked.index(atom)])
-
-                self.logger.debug(
-                    "\n"
-                    + "\n".join([
-                        f"Child node position: {c.position}" for c in node.state.child_nodes
-                    ])
-                )
-
-                re = (
-                    -1
-                    if atom == "\n"
-                    else self.reward_calculator.calc_reward_from_objective_values(
-                        values=objective_values[i], conf=self.conf
-                    )
-                )
-                if self.conf["include_filter_result_in_reward"]:
-                    re *= filter_check_list[i]
-
-                re_list.append(re)
-                self.logger.debug(f"\nAdded atom: {atom} \nReward list: {re_list}")
-            self.reward_values_list.extend(re_list)
-
-            """backpropation step"""
-            for i in range(len(node_pool)):
-                node = node_pool[i]
-                back_propagation(node, reward=re_list[i])
-
-            self.logger.debug(
-                "\n"
-                + "\n".join([
-                    f"Child node position: {c.position} Total reward: {c.state.total_reward} Visit count: {c.state.visits}"
-                    for c in node_pool
-                ])
-            )
-
-            if (
-                len(self.valid_smiles_list) > self.conf["flush_threshold"]
-                and self.conf["flush_threshold"] != -1
-            ):
-                self.flush()
-
-
 
     def flush(self):
         df = pd.DataFrame({
@@ -390,11 +280,6 @@ class MCTS:
             self.objective_values_list.extend(objective_values)
             self.generated_id_list.extend(generated_id_list)
             self.filter_check_list.extend(filter_check_list)
-            for cal_hyat in valid_smiles:
-
-                self.heavy_atom_count_list.append(rd)
-
-
 
             self.logger.info(f"Number of valid SMILES in this cycle: {self.total_valid_num}")
             self.logger.debug(
@@ -426,7 +311,7 @@ class MCTS:
                     -1
                     if atom == "\n"
                     else self.reward_calculator.calc_reward_from_objective_values(
-                        values=objective_values[i], conf=self.conf
+                        values=objective_values[i], conf=self.conf,smiles = valid_smiles[i]
                     )
                 )
                 if self.conf["include_filter_result_in_reward"]:

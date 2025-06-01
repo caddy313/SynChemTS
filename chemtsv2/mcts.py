@@ -239,11 +239,6 @@ class MCTS:
 
 
 
-
-
-
-
-
     def flush(self):
         df = pd.DataFrame({
             "generated_id": self.generated_id_list,

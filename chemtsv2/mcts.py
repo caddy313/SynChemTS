@@ -378,10 +378,11 @@ class MCTS:
         if len(self.valid_smiles_list) > 0:
             self.flush()
 
-        if self.synonymous_counter > self.synonymous_threshold_num:
-            '''test synonymous_trigger'''
-            self.synonymous_trigger()
-            self.synonymous_counter=0
+        if self.synonymous_threshold_num >0:
+            if self.synonymous_counter > self.synonymous_threshold_num:
+                '''test synonymous_trigger'''
+                self.synonymous_trigger()
+                self.synonymous_counter=0
 
     def insert_tokens_to_tree(self, single_smiles_token_list,reward):
         """

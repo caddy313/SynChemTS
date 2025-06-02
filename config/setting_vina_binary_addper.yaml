@@ -1,0 +1,80 @@
+# Basic setting
+c_val: 1.5
+# threshold_type: [time, generation_num]
+threshold_type: time
+hours: 4
+generation_num: 1000
+output_dir: result/testper/61-6-base04-c1.5
+model_setting:
+  model_json: model/model_chembl220k.tf25.json
+  model_weight: model/model_chembl220k.tf25.best.ckpt.h5
+token: model/tokens_chembl220k.pkl
+reward_setting:
+  reward_module: reward.Vina_binary_reward_addper
+  reward_class: Vina_reward
+
+# Advanced setting
+expansion_threshold: 0.998
+simulation_num: 3
+flush_threshold: 10
+policy_setting: 
+  policy_module: policy.ucb1
+  policy_class: Ucb1
+
+# Restart setting
+save_checkpoint: False
+restart: False
+checkpoint_file: chemtsv2.ckpt.pkl
+
+# Filter setting
+use_lipinski_filter: True
+lipinski_filter:
+  module: filter.lipinski_filter
+  class: LipinskiFilter
+  type: rule_of_5
+use_radical_filter: False
+radical_filter:
+  module: filter.radical_filter
+  class: RadicalFilter
+use_pubchem_filter: False
+pubchem_filter:
+  module: filter.pubchem_filter
+  class: PubchemFilter
+use_sascore_filter: True
+sascore_filter:
+  module: filter.sascore_filter
+  class: SascoreFilter
+  threshold: 3.5
+use_ring_size_filter: False
+ring_size_filter:
+  module: filter.ring_size_filter
+  class: RingSizeFilter
+  threshold: 6
+use_pains_filter: False
+pains_filter:
+  module: filter.pains_filter
+  class: PainsFilter
+  type: [pains_a]
+include_filter_result_in_reward: False
+
+# User setting
+vina_bin_path: /project/vina
+vina_sf_name: vina
+vina_cpus: 16
+vina_receptor: ./data/FAM171/human_FAM171A2_cutted_minimized_rotated.pdbqt
+vina_center: [-12.583, -7.583, -22.86]
+vina_box_size: [12, 40, 40]
+vina_spacing: 0.375
+vina_exhaustiveness: 16
+vina_num_modes: 9
+vina_energy_range: 3
+vina_base_score: -10
+vina_min_rmsd: 1.0
+vina_max_evals: 0
+vina_base_per: -0.40
+
+##part_dock*a + part_per*(1-a)
+##a = reward_harmonic_parameter
+reward_harmonic_parameter: 0
+select_num: 10
+synonymous_transform_times: 5

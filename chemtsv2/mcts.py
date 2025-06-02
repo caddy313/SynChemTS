@@ -16,7 +16,7 @@ from chemtsv2.utils import (
 )
 
 from chemtsv2.SmilesEnumerator import SmilesEnumerator
-from chemtsv2.preprocessing1  import  smi_tokenizer,standardize_smiles
+from chemtsv2.Synonymous_processing  import  smi_tokenizer,standardize_smiles
 import csv
 
 class State:

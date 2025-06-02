@@ -15,6 +15,9 @@ from chemtsv2.utils import (
     back_propagation,
 )
 
+from chemtsv2.SmilesEnumerator import SmilesEnumerator
+from chemtsv2.preprocessing1  import  smi_tokenizer,standardize_smiles
+import csv
 
 class State:
     def __init__(self, position=["&"], parent=None):
@@ -73,6 +76,8 @@ class Node:
         self.state.total_reward += reward
 
 
+
+
 class MCTS:
     def __init__(
         self,
@@ -101,7 +106,13 @@ class MCTS:
         self.generated_dict = {}  # dictionary of generated compounds
         self.generated_id_list = []
         self.filter_check_list = []
+        self.heavy_atom_count_list=[]
         self.total_valid_num = 0
+
+
+
+
+
 
         if conf["batch_reward_calculation"]:
             self.obj_column_names = [
@@ -129,6 +140,11 @@ class MCTS:
         else:
             sys.exit("[ERROR] Specify 'threshold_type': [time, generation_num]")
 
+        self.synonymous_threshold_num = conf["synonymous_threshold_num"]
+
+
+        self.synonymous_counter=0
+
     def flush(self):
         df = pd.DataFrame({
             "generated_id": self.generated_id_list,
@@ -138,6 +154,8 @@ class MCTS:
             "elapsed_time": self.elapsed_time_list,
             "is_through_filter": self.filter_check_list,
         })
+        # 强制 reward 列为数值类型
+        df["reward"] = pd.to_numeric(df["reward"], errors="coerce")
         df_obj = pd.DataFrame(self.objective_values_list, columns=self.obj_column_names)
         df = pd.concat([df, df_obj], axis=1)
         if os.path.exists(self.output_path):
@@ -146,6 +164,9 @@ class MCTS:
             df.to_csv(self.output_path, mode="w", index=False)
         self.logger.info(f"save results at {self.output_path}")
 
+
+        self.synonymous_counter += len(self.valid_smiles_list)
+
         self.generated_id_list.clear()
         self.valid_smiles_list.clear()
         self.reward_values_list.clear()
@@ -153,6 +174,13 @@ class MCTS:
         self.elapsed_time_list.clear()
         self.filter_check_list.clear()
         self.objective_values_list.clear()
+
+
+
+
+
+
+
 
     def search(self):
         """initialization of search tree"""
@@ -281,6 +309,9 @@ class MCTS:
             self.generated_id_list.extend(generated_id_list)
             self.filter_check_list.extend(filter_check_list)
 
+
+
+
             self.logger.info(f"Number of valid SMILES in this cycle: {self.total_valid_num}")
             self.logger.debug(
                 f"\nNode index: {node_index} \nObjective_values: {objective_values} \nValid smiles: {valid_smiles} \nTime {elapsed_time}"
@@ -311,7 +342,7 @@ class MCTS:
                     -1
                     if atom == "\n"
                     else self.reward_calculator.calc_reward_from_objective_values(
-                        values=objective_values[i], conf=self.conf,smiles = valid_smiles[i]
+                        values=objective_values[i], conf=self.conf,smiles=valid_smiles[i]
                     )
                 )
                 if self.conf["include_filter_result_in_reward"]:
@@ -346,6 +377,92 @@ class MCTS:
 
         if len(self.valid_smiles_list) > 0:
             self.flush()
+
+        if self.synonymous_counter > self.synonymous_threshold_num:
+            '''test synonymous_trigger'''
+            self.synonymous_trigger()
+            self.synonymous_counter=0
+
+    def insert_tokens_to_tree(self, single_smiles_token_list,reward):
+        """
+        从 root_node 开始，将 token_list 表示的路径插入到树中。
+        参数：
+            token_list: 例如 ["&", "C", "C", "O", "\n"]
+            StateClass: 自定义的 State 类，用于构造新节点的状态
+        返回：
+            最终插入或命中的叶节点（Node）
+        """
+        print("add to tree")
+        if single_smiles_token_list[-1] != "\n":
+            single_smiles_token_list.append("\n")
+        current_node = self.rootnode  # ✅ 初始化根节点，只执行一次
+        for i, node_token in enumerate(single_smiles_token_list):
+            if node_token == "&":
+                continue
+
+            matched_child = None
+            for child in current_node.state.child_nodes:
+                if child.position == node_token:
+                    matched_child = child
+                    break
+
+            if matched_child is not None:
+                current_node = matched_child
+            else:
+                new_state = State()
+                new_state.position = current_node.state.position[:]
+                new_state.add_position(node_token)
+                new_state.parent_node = current_node
+                current_node.add_node(node_token, new_state)
+                current_node = current_node.state.child_nodes[-1]
+        print("background")
+        back_propagation(current_node, reward)
+        print("add to tree finish")
+
+    def synonymous_trigger(self):
+        # === 用户配置 ===
+        # 输入文件名
+        print("strigeer start")
+        # === 读取数据 ===
+        df=pd.read_csv(self.output_path)
+        select_num= self.conf.get("select_num", 10)
+        synonymous_transform_times= self.conf.get("synonymous_transform_times", 5)
+
+
+        # === 1. 按 reward 降序排序 ===
+        df_sorted = df.sort_values(by="reward", ascending=False)
+
+        # === 2. 取前 200 行 ===
+        df_top_200 = df_sorted.head(select_num*4)
+
+
+        # === 3. 去除重复 SMILES，只保留第一个 ===
+        df_top_200["smiles"] = df_top_200["smiles"].apply(standardize_smiles)
+        df_unique = df_top_200.drop_duplicates(subset="smiles", keep="first")
+
+        # === 4. 取前 30 个 ===
+        df_top_30 = df_unique.head(select_num)
+        smiles_list=df_top_30["smiles"]
+        reward_list=df_top_30["reward"]
+        sme = SmilesEnumerator()
+        for wait_smiles,reward in zip(smiles_list,reward_list):
+                synonymous_mol_list=[]
+                for i in range(synonymous_transform_times):
+                    synonymous_mol = sme.randomize_smiles(wait_smiles)
+                    synonymous_mol_list.append(synonymous_mol)
+                unique_lst = list(set(synonymous_mol_list))
+                for i in unique_lst:
+                  tokenss=smi_tokenizer(i)
+                  self.insert_tokens_to_tree(tokenss,reward)
+
+                with open(self.output_path, "a", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([wait_smiles, reward,synonymous_mol_list])
+                print("strigger one smiles")
+        print("trigger finish")
+
+
+
 
     def load_checkpoint(self):
         ckpt_path = os.path.join(self.conf["output_dir"], self.conf["checkpoint_file"])

@@ -111,9 +111,6 @@ class MCTS:
 
 
 
-
-
-
         if conf["batch_reward_calculation"]:
             self.obj_column_names = [
                 f.__name__ for f in self.reward_calculator.get_batch_objective_functions()
@@ -140,9 +137,7 @@ class MCTS:
         else:
             sys.exit("[ERROR] Specify 'threshold_type': [time, generation_num]")
 
-        self.synonymous_threshold_num = conf["synonymous_threshold_num"]
-
-
+        self.synonymous_threshold_num = conf.get("synonymous_threshold_num",5000)
         self.synonymous_counter=0
 
     def flush(self):
@@ -165,7 +160,13 @@ class MCTS:
         self.logger.info(f"save results at {self.output_path}")
 
 
-        self.synonymous_counter += len(self.valid_smiles_list)
+        self.synonymous_counter+=len(self.valid_smiles_list)
+
+        print(self.synonymous_threshold_num,"!!!!!!!!!!!!!!!!!!!!!!!")
+        if self.synonymous_counter > self.synonymous_threshold_num:
+                '''test synonymous_trigger'''
+                self.synonymous_trigger()
+                self.synonymous_counter=0
 
         self.generated_id_list.clear()
         self.valid_smiles_list.clear()
@@ -300,6 +301,8 @@ class MCTS:
 
             valid_num = len(valid_smiles)
             self.total_valid_num += valid_num
+
+
             self.valid_smiles_list.extend(valid_smiles)
             depth = len(state.position)
             self.depth_list.extend([depth for _ in range(valid_num)])
@@ -378,11 +381,7 @@ class MCTS:
         if len(self.valid_smiles_list) > 0:
             self.flush()
 
-        if self.synonymous_threshold_num >0:
-            if self.synonymous_counter > self.synonymous_threshold_num:
-                '''test synonymous_trigger'''
-                self.synonymous_trigger()
-                self.synonymous_counter=0
+
 
     def insert_tokens_to_tree(self, single_smiles_token_list,reward):
         """
@@ -423,7 +422,7 @@ class MCTS:
     def synonymous_trigger(self):
         # === 用户配置 ===
         # 输入文件名
-        print("strigeer start")
+        print("strigeer start!!!!!")
         # === 读取数据 ===
         df=pd.read_csv(self.output_path)
         select_num= self.conf.get("select_num", 10)
@@ -441,25 +440,45 @@ class MCTS:
         df_top_200["smiles"] = df_top_200["smiles"].apply(standardize_smiles)
         df_unique = df_top_200.drop_duplicates(subset="smiles", keep="first")
 
-        # === 4. 取前 30 个 ===
-        df_top_30 = df_unique.head(select_num)
-        smiles_list=df_top_30["smiles"]
-        reward_list=df_top_30["reward"]
+        # === 4. 取前 select_num 个 ===
+        df_top = df_unique.head(select_num)
+
+        # df_top.to_csv("df_top_output.csv", index=False)
+        # df_top.conf["output_dir"]
+        df_top.to_csv(self.conf['output_dir']+"/synonymous_added_smiles.csv", index=False, encoding='utf-8-sig', mode='a', header=False)
+
+        smiles_list=df_top["smiles"]
+        reward_list=df_top["reward"]
+
+
+
+
+
         sme = SmilesEnumerator()
         for wait_smiles,reward in zip(smiles_list,reward_list):
                 synonymous_mol_list=[]
+                print("wait_smiles:",wait_smiles)
                 for i in range(synonymous_transform_times):
+
                     synonymous_mol = sme.randomize_smiles(wait_smiles)
                     synonymous_mol_list.append(synonymous_mol)
-                unique_lst = list(set(synonymous_mol_list))
-                for i in unique_lst:
-                  tokenss=smi_tokenizer(i)
-                  self.insert_tokens_to_tree(tokenss,reward)
 
-                with open(self.output_path, "a", newline="") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([wait_smiles, reward,synonymous_mol_list])
-                print("strigger one smiles")
+                unique_lst = list(set(synonymous_mol_list))
+                df_unique_lst = pd.DataFrame([unique_lst])
+                df_unique_lst.to_csv(self.conf['output_dir']+"/synonymous_added_smiles.csv", index=False, encoding='utf-8-sig', mode='a', header=False)
+
+
+                for wait_add in unique_lst:
+                    '''取决于加入分词后的tokens，还是整个分子当做一个token'''
+                    # wait_add=smi_tokenizer(wait_add)
+                    '''将其放入列表'''
+                    wait_add=list(wait_add)
+                    self.insert_tokens_to_tree(wait_add,reward)
+
+                # with open(self.output_path, "a", newline="") as f:
+                #     writer = csv.writer(f)
+                #     writer.writerow([wait_smiles, reward,synonymous_mol_list])
+
         print("trigger finish")
 
 

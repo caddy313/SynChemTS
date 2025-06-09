@@ -485,6 +485,7 @@ class MCTS:
 
     def get_model_and_tokens(self, state):
         if state.source_model == "syn":
+            print("Use syn model !!!")
             return self.syn_model, self.syn_tokens
         return self.model, self.tokens
 

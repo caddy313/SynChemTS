@@ -28,7 +28,26 @@ def calc_execution_time(f):
 
 
 def get_expanded_node_index(model, state, tokens, logger, threshold=0.995):
-    get_int = [tokens.index(state[j]) for j in range(len(state))]
+    """
+    state: 原本是 state.position 列表，可能含有整条 SMILES 字符串
+    tokens: 全局 token 词表
+    """
+
+    # —— 新增：把 state 里所有不在 tokens 中的元素，按 smi_tokenizer 拆分 ——
+    flat_state = []
+    for t in state:
+        if t in tokens:
+            flat_state.append(t)
+        else:
+            # t 不在主词表里，按 SMILES 重新分词
+            subtoks = smi_tokenizer(t)
+            # smi_tokenizer 通常会在首位加 '&'，如果 flat_state 已经有 '&' 就去掉
+            if subtoks and subtoks[0] == "&" and flat_state:
+                subtoks = subtoks[1:]
+            flat_state.extend(subtoks)
+
+    # get_int = [tokens.index(state[j]) for j in range(len(state))]
+    get_int = [tokens.index(tok) for tok in flat_state]
     x = np.reshape(get_int, (1, len(get_int)))
     model.reset_states()
     preds = model.predict_on_batch(x)
@@ -58,9 +77,22 @@ def back_propagation(node, reward):
 
 def generate_smiles_as_token_index(model, state, tokens, conf):
     end = "\n"
-    position = []
-    position.extend(state)
-    get_int = [tokens.index(position[j]) for j in range(len(position))]
+
+    # —— 新增：先把 state 扁平化 ——
+    flat_position = []
+    for tok in state:
+        if tok in tokens:
+            flat_position.append(tok)
+        else:
+            # 遇到不在词表里的，就当作完整 SMILES 重新分词
+            subtoks = smi_tokenizer(tok)
+            # smi_tokenizer 通常会加 '&'，如果已在 flat_position 里就去掉
+            if subtoks and subtoks[0] == "&" and flat_position:
+                subtoks = subtoks[1:]
+            flat_position.extend(subtoks)
+
+
+    get_int = [tokens.index(tok) for tok in flat_position]
     x = np.reshape(get_int, (1, len(get_int)))
     model.reset_states()
 
@@ -99,8 +131,8 @@ def has_passed_through_filters(smiles, conf):
 
 
 def neutralize_monovalent_charges(mol):
-    """ 
-    Neutralizes monovalent charges in a molecule while ignoring charge-delocalized functional 
+    """
+    Neutralizes monovalent charges in a molecule while ignoring charge-delocalized functional
     groups (e.g., nitro).
     This function is inspired by the work by Noel O’Boyle (https://www.rdkit.org/docs/Cookbook.html#neutralizing-molecules).
     """
@@ -327,3 +359,32 @@ def transform_linker_to_mol(conf: dict):
         return wrapper
 
     return decorator
+
+
+def tokenize_smiles(smiles_list, use_selfies=False):
+    tokenized_smiles_list = []
+    unique_token_set = set()
+    for smi in smiles_list:
+        tokenized_smiles =  smi_tokenizer(smi)
+        tokenized_smiles.append("\n")
+        unique_token_set |= set(tokenized_smiles)
+        tokenized_smiles_list.append(tokenized_smiles)
+    return sorted(list(unique_token_set)), tokenized_smiles_list
+
+
+
+
+def smi_tokenizer(smi):
+    """
+    This function is based on https://github.com/pschwllr/MolecularTransformer#pre-processing
+    Modified by Shoichi Ishida
+    """
+    pattern = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
+    regex = re.compile(pattern)
+    tokens = [token for token in regex.findall(smi)]
+    assert smi == "".join(tokens)
+    tokens.insert(0, "&")
+    return tokens
+
+
+

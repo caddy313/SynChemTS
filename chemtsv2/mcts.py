@@ -15,21 +15,25 @@ from chemtsv2.utils import (
     back_propagation,
 )
 
+from chemtsv2.SmilesEnumerator import SmilesEnumerator
+from chemtsv2.Synonymous_processing  import  standardize_smiles,smi_tokenizer
+
 
 class State:
-    def __init__(self, position=["&"], parent=None):
+    def __init__(self, position=["&"], parent=None, source_model="default"):
         self.position = position
         self.visits = 0
         self.total_reward = 0
         self.parent_node = parent
         self.child_nodes = []
-
+        self.source_model = source_model  # 👈 加上这一行
     def clone(
         self,
         include_visit=False,
         include_total_reward=False,
         include_parent_node=False,
         include_child_node=False,
+
     ):
         st = State()
         st.position = self.position[:]
@@ -37,6 +41,7 @@ class State:
         st.total_reward = self.total_reward if include_total_reward else 0
         st.parent_node = self.parent_node if include_parent_node else None
         st.child_nodes = self.child_nodes if include_child_node else []
+        st.source_model = self.source_model  # 👈 克隆时保留 source_model
         return st
 
     def add_position(self, m):
@@ -73,6 +78,8 @@ class Node:
         self.state.total_reward += reward
 
 
+
+
 class MCTS:
     def __init__(
         self,
@@ -80,6 +87,8 @@ class MCTS:
         conf,
         tokens,
         model,
+        syn_tokens,
+        syn_model,
         reward_calculator,
         policy_evaluator,
         logger,
@@ -89,6 +98,8 @@ class MCTS:
         self.conf = conf
         self.tokens = tokens
         self.model = model
+        self.syn_tokens = syn_tokens
+        self.syn_model = syn_model
         self.reward_calculator = reward_calculator
         self.policy_evaluator = policy_evaluator
         self.logger = logger
@@ -101,7 +112,10 @@ class MCTS:
         self.generated_dict = {}  # dictionary of generated compounds
         self.generated_id_list = []
         self.filter_check_list = []
+        self.heavy_atom_count_list=[]
         self.total_valid_num = 0
+
+
 
         if conf["batch_reward_calculation"]:
             self.obj_column_names = [
@@ -129,6 +143,9 @@ class MCTS:
         else:
             sys.exit("[ERROR] Specify 'threshold_type': [time, generation_num]")
 
+        self.synonymous_threshold_num = conf.get("synonymous_threshold_num",5000)
+        self.synonymous_counter=0
+
     def flush(self):
         df = pd.DataFrame({
             "generated_id": self.generated_id_list,
@@ -138,6 +155,8 @@ class MCTS:
             "elapsed_time": self.elapsed_time_list,
             "is_through_filter": self.filter_check_list,
         })
+        # 强制 reward 列为数值类型
+        df["reward"] = pd.to_numeric(df["reward"], errors="coerce")
         df_obj = pd.DataFrame(self.objective_values_list, columns=self.obj_column_names)
         df = pd.concat([df, df_obj], axis=1)
         if os.path.exists(self.output_path):
@@ -146,6 +165,15 @@ class MCTS:
             df.to_csv(self.output_path, mode="w", index=False)
         self.logger.info(f"save results at {self.output_path}")
 
+
+        self.synonymous_counter+=len(self.valid_smiles_list)
+
+        print(self.synonymous_threshold_num,"!!!!!!!!!!!!!!!!!!!!!!!")
+        if self.synonymous_counter > self.synonymous_threshold_num:
+                '''test synonymous_trigger'''
+                self.synonymous_trigger()
+                self.synonymous_counter=0
+
         self.generated_id_list.clear()
         self.valid_smiles_list.clear()
         self.reward_values_list.clear()
@@ -153,6 +181,13 @@ class MCTS:
         self.elapsed_time_list.clear()
         self.filter_check_list.clear()
         self.objective_values_list.clear()
+
+
+
+
+
+
+
 
     def search(self):
         """initialization of search tree"""
@@ -193,10 +228,11 @@ class MCTS:
                 self.loop_counter_for_selection = 0
 
             """expansion step"""
+            model, tokens = self.get_model_and_tokens(state)
             expanded = get_expanded_node_index(
-                self.model,
+                model,
                 state.position,
-                self.tokens,
+                tokens,
                 self.logger,
                 threshold=self.conf["expansion_threshold"],
             )
@@ -221,17 +257,24 @@ class MCTS:
             new_compound = []
             nodeadded = []
             for _ in range(self.conf["simulation_num"]):
-                nodeadded_tmp = get_token_to_add(expanded, self.tokens, self.logger)
+                _, tokens = self.get_model_and_tokens(state)
+                nodeadded_tmp = get_token_to_add(expanded, tokens, self.logger)
                 nodeadded.extend(nodeadded_tmp)
                 for n in nodeadded_tmp:
+
+
+
                     position_tmp = state.position + [n]
+                    model, tokens = self.get_model_and_tokens(state)
+
                     generated_token_indexes = generate_smiles_as_token_index(
-                        self.model, position_tmp, self.tokens, self.conf
+                        model, position_tmp, tokens, self.conf
                     )
+
                     new_compound.append(
                         build_smiles_from_token_index(
                             generated_token_indexes,
-                            self.tokens,
+                            tokens,
                             use_selfies=self.conf["use_selfies"],
                         )
                     )
@@ -272,6 +315,8 @@ class MCTS:
 
             valid_num = len(valid_smiles)
             self.total_valid_num += valid_num
+
+
             self.valid_smiles_list.extend(valid_smiles)
             depth = len(state.position)
             self.depth_list.extend([depth for _ in range(valid_num)])
@@ -280,6 +325,9 @@ class MCTS:
             self.objective_values_list.extend(objective_values)
             self.generated_id_list.extend(generated_id_list)
             self.filter_check_list.extend(filter_check_list)
+
+
+
 
             self.logger.info(f"Number of valid SMILES in this cycle: {self.total_valid_num}")
             self.logger.debug(
@@ -311,7 +359,7 @@ class MCTS:
                     -1
                     if atom == "\n"
                     else self.reward_calculator.calc_reward_from_objective_values(
-                        values=objective_values[i], conf=self.conf,smiles = valid_smiles[i]
+                        values=objective_values[i], conf=self.conf,smiles=valid_smiles[i]
                     )
                 )
                 if self.conf["include_filter_result_in_reward"]:
@@ -346,6 +394,101 @@ class MCTS:
 
         if len(self.valid_smiles_list) > 0:
             self.flush()
+
+
+
+    def insert_smiles_to_tree(self, full_smiles: str, reward: float) -> Node:
+        current_node = self.rootnode
+
+        # 如果已经存在就跳过
+        for child in current_node.state.child_nodes:
+            if child.position == full_smiles:
+                current_node = child
+                break
+        else:
+            new_state = current_node.state.clone(
+                include_visit=1,
+                include_total_reward=reward,
+                include_parent_node=self.rootnode,
+                include_child_node=None,
+            )
+            # 这里把完整字符串当一个 token 加入 position
+            new_state.add_position(full_smiles)
+            new_state.source_model = "syn"
+
+            # m=full_smiles，状态里 position 也有 full_smiles
+            new_node = current_node.add_node(full_smiles, new_state)
+            current_node = new_node
+
+        back_propagation(current_node, reward)
+
+
+    def synonymous_trigger(self):
+        # === 用户配置 ===
+        # 输入文件名
+        print("strigeer start!!!!!")
+        # === 读取数据 ===
+        df=pd.read_csv(self.output_path)
+        select_num= self.conf.get("select_num", 10)
+        synonymous_transform_times= self.conf.get("synonymous_transform_times", 5)
+
+
+        # === 1. 按 reward 降序排序 ===
+        df_sorted = df.sort_values(by="reward", ascending=False)
+
+        # === 2. 取前 200 行 ===
+        df_top_200 = df_sorted.head(select_num*4)
+
+
+        # === 3. 去除重复 SMILES，只保留第一个 ===
+        df_top_200["smiles"] = df_top_200["smiles"].apply(standardize_smiles)
+        df_unique = df_top_200.drop_duplicates(subset="smiles", keep="first")
+
+        # === 4. 取前 select_num 个 ===
+        df_top = df_unique.head(select_num)
+
+        # df_top.to_csv("df_top_output.csv", index=False)
+        # df_top.conf["output_dir"]
+        df_top.to_csv(self.conf['output_dir']+"/synonymous_added_smiles.csv", index=False, encoding='utf-8-sig', mode='a', header=False)
+
+        smiles_list=df_top["smiles"]
+        reward_list=df_top["reward"]
+
+
+        sme = SmilesEnumerator()
+        for wait_smiles,reward in zip(smiles_list,reward_list):
+                synonymous_mol_list=[]
+                print("wait_smiles:",wait_smiles)
+                for i in range(synonymous_transform_times):
+
+                    synonymous_mol = sme.randomize_smiles(wait_smiles)
+                    synonymous_mol_list.append(synonymous_mol)
+
+                unique_lst = list(set(synonymous_mol_list))
+                df_unique_lst = pd.DataFrame([unique_lst])
+                df_unique_lst.to_csv(self.conf['output_dir']+"/synonymous_added_smiles.csv", index=False, encoding='utf-8-sig', mode='a', header=False)
+
+
+                for wait_add in unique_lst:
+                    # '''取决于加入分词后的tokens，还是整个分子当做一个token'''
+                    # wait_add_tokens=smi_tokenizer(wait_add)
+                    '''将其放入列表'''
+                    wait_add
+                    self.insert_smiles_to_tree(wait_add,reward)
+
+                # with open(self.output_path, "a", newline="") as f:
+                #     writer = csv.writer(f)
+                #     writer.writerow([wait_smiles, reward,synonymous_mol_list])
+
+        print("trigger finish")
+
+
+    def get_model_and_tokens(self, state):
+        if state.source_model == "syn":
+            return self.syn_model, self.syn_tokens
+        return self.model, self.tokens
+
+
 
     def load_checkpoint(self):
         ckpt_path = os.path.join(self.conf["output_dir"], self.conf["checkpoint_file"])

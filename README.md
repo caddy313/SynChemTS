@@ -25,26 +25,8 @@ Naively adding these molecules token by token would create many new branches, wa
 Model	Purpose
 Standard SMILES model	Finds basic scaffolds and performs the initial optimization
 Non-standard SMILES model	Optimizes molecules written as non-standard (non-canonical) SMILES, such as those produced by the synonymous transformation step
-Method Overview
-        ┌───────────────────────────────┐
-        │  Standard SMILES model + MCTS │   scaffold discovery,
-        │                               │   initial optimization
-        └───────────────┬───────────────┘
-                        │ promising molecules
-                        ▼
-        ┌───────────────────────────────┐
-        │ Synonymous SMILES transform   │   at user-defined time points
-        │ (whole string = one tree node)│
-        └───────────────┬───────────────┘
-                        │ re-insert into tree
-                        ▼
-        ┌───────────────────────────────┐
-        │ Non-standard SMILES model     │   further optimization
-        │ + MCTS                        │
-        └───────────────┬───────────────┘
-                        │
-                        ▼
-        Reward = f(LE, DockScore, sigmoid size compensation)
+
+
 Reward Function
 
 The reward is built from the docking score and ligand efficiency, with a sigmoid-bounded size compensation applied to LE:

@@ -1,23 +1,56 @@
-# crispy-octo-fishstick
+# SynChemTS
 
-先前结合蒙特卡洛树的从头设计方法：
+MCTS-Based De Novo Molecular Design with Ligand-Efficiency Feedback
 
-1、直接将对接得分作为reward函数进行反馈
+A structure-based de novo molecular design framework built on Monte Carlo Tree Search (MCTS). It improves on earlier MCTS + docking pipelines by (1) replacing the raw docking score with a size-compensated ligand-efficiency reward, (2) periodically re-injecting promising molecules into the search tree through synonymous SMILES transformations, and (3) using two complementary generative models: one for standard SMILES and one for non-standard SMILES.
 
-在对接时小分子的分子量越大，其平均结合能就越低，因此直接将其作为reward函数进行反馈是不合适的。因为这样优化方向就不再注重每个原子的贡献，而倾向于不断延长分子的长度，以获得更高的对接分数。
+Background and Motivation
 
-2、smiles字符串的线性性制约了优化方向
+Earlier de novo design approaches that combine MCTS with a generative SMILES model have two main limitations.
 
-生成的优秀分子在总体上仅仅进行线性的优化，一旦分子的一部分形成，就再没有回过头来进行优化的机会
+1. Using the docking score directly as the reward is biased toward large molecules. Docking scores tend to improve (become more negative) as molecular weight increases, so larger molecules obtain a lower average binding energy almost regardless of quality. If the docking score is used directly as the reward, the search stops rewarding the contribution of each individual atom and instead drifts toward ever-longer molecules in order to collect a better score.
 
-创新：
+2. The linear nature of SMILES restricts the optimization direction. SMILES strings are generated token by token, so optimization is effectively linear. Once part of a molecule has been built, there is no opportunity to go back and revise it. Good molecules are therefore only refined "forward", never globally.
 
-1、使用LE与DockScore相结合的方法进行反馈，并制定了LE的补偿系数。
+Key Contributions
+1. Ligand Efficiency (LE) combined with docking score, with a size-compensation coefficient
+The reward combines LE and the docking score, so that the search favors molecules whose atoms contribute efficiently to binding rather than molecules that are simply large.
+LE naturally decreases as molecules grow, because larger molecules need linkers to join their high-contribution fragments, and linkers contribute little to binding. To avoid penalizing legitimately larger molecules, a compensation coefficient is applied to LE as a function of molecular size.
+A purely linear compensation would reward unbounded growth and bring back the length-inflation problem. The compensation coefficient is therefore a sigmoid function of molecular size, which gives it a fixed upper bound: larger molecules receive compensation, but only up to a limit.
+2. Synonymous SMILES transformation and re-insertion into the search tree
+At user-definable time points during the search, promising molecules are selected and converted into synonymous (equivalent) SMILES representations of the same molecule.
+These transformed strings are re-inserted into the MCTS tree, which changes the direction of optimization and gives the search a chance to revise parts of a molecule that the linear generation order would otherwise lock in.
+Naively adding these molecules token by token would create many new branches, wasting resources and hindering convergence. Following the approach of the --input option in ChemTSv2, the entire SMILES string is treated as a single node, which avoids the branch explosion.
+3. Dual-model architecture
+Model	Purpose
+Standard SMILES model	Finds basic scaffolds and performs the initial optimization
+Non-standard SMILES model	Optimizes molecules written as non-standard (non-canonical) SMILES, such as those produced by the synonymous transformation step
+Method Overview
+        ┌───────────────────────────────┐
+        │  Standard SMILES model + MCTS │   scaffold discovery,
+        │                               │   initial optimization
+        └───────────────┬───────────────┘
+                        │ promising molecules
+                        ▼
+        ┌───────────────────────────────┐
+        │ Synonymous SMILES transform   │   at user-defined time points
+        │ (whole string = one tree node)│
+        └───────────────┬───────────────┘
+                        │ re-insert into tree
+                        ▼
+        ┌───────────────────────────────┐
+        │ Non-standard SMILES model     │   further optimization
+        │ + MCTS                        │
+        └───────────────┬───────────────┘
+                        │
+                        ▼
+        Reward = f(LE, DockScore, sigmoid size compensation)
+Reward Function
 
-分子越大其LE贡献越小，这是由分子需要linker将高贡献部分连接起来决定的，所以为大分子加入补偿系数。同时为了避免线性的补偿系数造成的分子无上限的延长问题，使用sigmod函数作为补偿系数，为补偿系数确定上界。
+The reward is built from the docking score and ligand efficiency, with a sigmoid-bounded size compensation applied to LE:
 
-2、在可定义的时间点选出有潜力的分子进行同义变换重新加入蒙特卡洛树，改变优化方向
+Docking score: binding score from the docking program.
+LE: docking score normalized by molecular size (e.g., heavy atom count).
+Compensation coefficient: c(N) = sigmoid(N)-shaped, monotonically increasing in molecular size N and bounded above, so large molecules are compensated but cannot grow without limit.
 
-在同义变换加入蒙特卡洛树后，会出现极大的资源浪费，为此我们采用类似ChemTSv2中 "--input" 的方法，将生成的smiles字符串整体当做一个节点，从而避免因增加过多分支而导致不收敛的问题。
-
-3、增加了双模型，即标准smiles字符串模型用于寻找基本骨架和初步优化，非标准smiles字符串模型用于对非标准smiles进行优化。
+The exact functional form, normalization, and hyperparameters (sigmoid midpoint, steepness, upper bound, weighting between LE and docking score) are defined in the source code. See the configuration files for the values used in each experiment.

@@ -225,7 +225,20 @@ def main():
         conf["rnn_output_size"],
         conf["num_gru_units"],
     ) = get_model_structure_info(conf["model_setting"]["model_json"], logger)
+
     model = load_tensorflow_model(conf["model_setting"]["model_weight"], logger, conf)
+
+    (
+        conf["max_len"],
+        conf["rnn_vocab_size"],
+        conf["rnn_output_size"],
+        conf["num_gru_units"],
+    ) = get_model_structure_info(conf["syn_model_setting"]["model_json"], logger)
+    syn_model = load_tensorflow_model(conf["syn_model_setting"]["model_weight"], logger, conf)
+
+
+
+
     if args.input_smiles is not None:
         logger.info(f"Extend mode: input SMILES = {args.input_smiles}")
         conf["input_smiles"] = args.input_smiles
@@ -256,12 +269,20 @@ def main():
         tokens = pickle.load(f)
     logger.debug(f"Loaded tokens are {tokens}")
 
+    with open(conf["syn_token"], "rb") as f:
+        syn_tokens = pickle.load(f)
+    logger.debug(f"Loaded syn_tokens are {syn_tokens}")
+
+
+
     state = State() if args.input_smiles is None else State(position=conf["tokenized_smiles"])
     mcts = MCTS(
         root_state=state,
         conf=conf,
         tokens=tokens,
         model=model,
+        syn_tokens=syn_tokens,
+        syn_model=syn_model,
         reward_calculator=reward_calculator,
         policy_evaluator=policy_evaluator,
         logger=logger,
